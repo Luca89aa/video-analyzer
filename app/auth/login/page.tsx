@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { supabaseClient } from "@/lib/supabaseClient";
 
-// 🔴 IMPEDISCE IL PRERENDER IN BUILD (FIX DEFINITIVO)
+// 🔴 IMPEDISCE IL PRERENDER IN BUILD (OBBLIGATORIO)
 export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
@@ -12,9 +12,13 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    if (loading) return;
+
     setError("");
+    setLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -23,6 +27,7 @@ export default function LoginPage() {
 
     if (error) {
       setError(error.message);
+      setLoading(false);
       return;
     }
 
@@ -101,6 +106,7 @@ export default function LoginPage() {
         {/* BTN */}
         <button
           onClick={handleLogin}
+          disabled={loading}
           style={{
             width: "100%",
             marginTop: 20,
@@ -111,10 +117,11 @@ export default function LoginPage() {
             color: "white",
             fontSize: "1.1rem",
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.7 : 1,
           }}
         >
-          Login
+          {loading ? "Accesso..." : "Login"}
         </button>
 
         {/* LINK REGISTER */}
