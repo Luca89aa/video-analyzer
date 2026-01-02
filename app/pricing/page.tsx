@@ -54,7 +54,6 @@ export default function PaymentsPage() {
               name="return"
               value="http://localhost:3000/payment/success?pack=5"
             />
-
             <button style={btn}>Acquista ora</button>
           </form>
         </div>
@@ -79,7 +78,6 @@ export default function PaymentsPage() {
               name="return"
               value="http://localhost:3000/payment/success?pack=10"
             />
-
             <button style={btn}>Acquista ora</button>
           </form>
         </div>
@@ -104,7 +102,6 @@ export default function PaymentsPage() {
               name="return"
               value="http://localhost:3000/payment/success?pack=25"
             />
-
             <button style={btn}>Acquista ora</button>
           </form>
         </div>
@@ -129,7 +126,6 @@ export default function PaymentsPage() {
               name="return"
               value="http://localhost:3000/payment/success?pack=50"
             />
-
             <button style={btn}>Acquista ora</button>
           </form>
         </div>
@@ -154,7 +150,6 @@ export default function PaymentsPage() {
               name="return"
               value="http://localhost:3000/payment/success?pack=100"
             />
-
             <button style={btnSpecial}>Acquista ora</button>
           </form>
         </div>
@@ -163,7 +158,7 @@ export default function PaymentsPage() {
   );
 }
 
-/* === STYLE === */
+/* === STYLE (TIPIZZATI) === */
 
 const card: CSSProperties = {
   padding: "30px",
@@ -208,7 +203,6 @@ const btn: CSSProperties = {
   fontSize: "1rem",
   cursor: "pointer",
   fontWeight: 700,
-  transition: "0.2s",
 };
 
 const btnSpecial: CSSProperties = {
