@@ -16,14 +16,17 @@ export default function UploadPage() {
   // 🔥 RECUPERO UTENTE + CREDITI
   useEffect(() => {
     async function loadUser() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
       if (!user) {
         window.location.href = "/auth/login";
         return;
       }
 
-      setEmail(user.email);
+      // ✅ FIX TypeScript (string | undefined → string | null)
+      setEmail(user.email ?? null);
       setUserId(user.id);
 
       const { data, error } = await supabase
@@ -41,7 +44,7 @@ export default function UploadPage() {
     }
 
     loadUser();
-  }, []);
+  }, [supabase]);
 
   // 🔥 ANALISI VIDEO + AGGIORNA CREDITI
   async function analyzeVideo(url: string) {
@@ -79,7 +82,6 @@ export default function UploadPage() {
       if (!creditsErr && newCredits) {
         setCredits(newCredits.credits);
       }
-
     } catch (err) {
       console.error("AI error:", err);
       alert("Errore nella chiamata AI");
@@ -127,8 +129,9 @@ export default function UploadPage() {
 
       alert("✅ Upload completato!");
 
-      if (json.url) await analyzeVideo(json.url);
-
+      if (json.url) {
+        await analyzeVideo(json.url);
+      }
     } catch (err) {
       console.error("Upload error:", err);
       alert("Errore imprevisto.");
@@ -140,14 +143,16 @@ export default function UploadPage() {
   // LOADING
   if (credits === null) {
     return (
-      <main style={{
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        color: "white",
-        background: "#0d1117",
-      }}>
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          color: "white",
+          background: "#0d1117",
+        }}
+      >
         Caricamento...
       </main>
     );
@@ -166,7 +171,9 @@ export default function UploadPage() {
         color: "white",
       }}
     >
-      <h1 style={{ fontSize: "2.4rem", fontWeight: 800 }}>Carica un video</h1>
+      <h1 style={{ fontSize: "2.4rem", fontWeight: 800 }}>
+        Carica un video
+      </h1>
 
       <p style={{ opacity: 0.7 }}>
         Crediti disponibili: <strong>{credits}</strong>
