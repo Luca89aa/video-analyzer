@@ -52,7 +52,7 @@ export default function PaymentsPage() {
             <input
               type="hidden"
               name="return"
-              value="http://localhost:3000/payment/success?pack=5"
+              value="https://video-analyzer.vercel.app/payment/success?pack=5"
             />
             <button style={btn}>Acquista ora</button>
           </form>
@@ -76,7 +76,7 @@ export default function PaymentsPage() {
             <input
               type="hidden"
               name="return"
-              value="http://localhost:3000/payment/success?pack=10"
+              value="https://video-analyzer.vercel.app/payment/success?pack=10"
             />
             <button style={btn}>Acquista ora</button>
           </form>
@@ -100,7 +100,7 @@ export default function PaymentsPage() {
             <input
               type="hidden"
               name="return"
-              value="http://localhost:3000/payment/success?pack=25"
+              value="https://video-analyzer.vercel.app/payment/success?pack=25"
             />
             <button style={btn}>Acquista ora</button>
           </form>
@@ -124,7 +124,7 @@ export default function PaymentsPage() {
             <input
               type="hidden"
               name="return"
-              value="http://localhost:3000/payment/success?pack=50"
+              value="https://video-analyzer.vercel.app/payment/success?pack=50"
             />
             <button style={btn}>Acquista ora</button>
           </form>
@@ -148,7 +148,7 @@ export default function PaymentsPage() {
             <input
               type="hidden"
               name="return"
-              value="http://localhost:3000/payment/success?pack=100"
+              value="https://video-analyzer.vercel.app/payment/success?pack=100"
             />
             <button style={btnSpecial}>Acquista ora</button>
           </form>
@@ -158,7 +158,7 @@ export default function PaymentsPage() {
   );
 }
 
-/* === STYLE (TIPIZZATI) === */
+/* === STYLES === */
 
 const card: CSSProperties = {
   padding: "30px",
@@ -168,7 +168,7 @@ const card: CSSProperties = {
   boxShadow: "0 12px 32px rgba(0,0,0,.3)",
   textAlign: "center",
   display: "flex",
-  flexDirection: "column",
+  flexDirection: "column" as const, // 🔑 FIX DEFINITIVO
   minHeight: "350px",
 };
 
