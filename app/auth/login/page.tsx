@@ -1,14 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { supabaseClient } from "@/lib/supabaseClient";
 
-// 🔴 IMPEDISCE IL PRERENDER IN BUILD (OBBLIGATORIO)
+// 🔴 impedisce il prerender
 export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
-  const supabase = supabaseClient;
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,6 +16,10 @@ export default function LoginPage() {
 
     setError("");
     setLoading(true);
+
+    // ✅ import SUPABASE SOLO A RUNTIME
+    const { supabaseClient } = await import("@/lib/supabaseClient");
+    const supabase = supabaseClient;
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -68,42 +69,28 @@ export default function LoginPage() {
           Accedi
         </h1>
 
-        {/* EMAIL */}
         <label style={label}>Email</label>
         <input
           type="email"
-          placeholder="Inserisci la tua email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           style={input}
         />
 
-        {/* PASSWORD */}
         <label style={label}>Password</label>
         <input
           type="password"
-          placeholder="Inserisci la password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={input}
         />
 
-        {/* ERRORE */}
         {error && (
-          <p
-            style={{
-              color: "#ef4444",
-              marginTop: 10,
-              marginBottom: 5,
-              fontSize: ".95rem",
-              textAlign: "center",
-            }}
-          >
+          <p style={{ color: "#ef4444", marginTop: 10, textAlign: "center" }}>
             {error}
           </p>
         )}
 
-        {/* BTN */}
         <button
           onClick={handleLogin}
           disabled={loading}
@@ -123,24 +110,6 @@ export default function LoginPage() {
         >
           {loading ? "Accesso..." : "Login"}
         </button>
-
-        {/* LINK REGISTER */}
-        <p
-          style={{
-            marginTop: 18,
-            textAlign: "center",
-            opacity: 0.7,
-            fontSize: ".9rem",
-          }}
-        >
-          Non hai un account?{" "}
-          <a
-            href="/auth/register"
-            style={{ color: "#3b82f6", textDecoration: "underline" }}
-          >
-            Registrati
-          </a>
-        </p>
       </div>
     </main>
   );
@@ -154,12 +123,10 @@ const input = {
   background: "#1f2937",
   color: "white",
   marginBottom: 20,
-  fontSize: "1rem",
 };
 
 const label = {
   display: "block",
   marginBottom: 6,
-  fontSize: "1rem",
   fontWeight: 600,
 };
