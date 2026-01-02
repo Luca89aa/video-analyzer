@@ -1,23 +1,31 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { supabaseClient } from "@/lib/supabaseClient";
 
-// 🔴 BLOCCA IL PRERENDER IN BUILD (OBBLIGATORIO NEXT 15)
+// 🔴 BLOCCA PRERENDER
 export const dynamic = "force-dynamic";
 
 export default function UploadPage() {
-  const supabase = supabaseClient;
+  const [supabase, setSupabase] = useState<any>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [aiResponse, setAiResponse] = useState<string>("");
+  const [aiResponse, setAiResponse] = useState("");
   const [credits, setCredits] = useState<number | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
+  // ✅ CARICA SUPABASE SOLO IN BROWSER
+  useEffect(() => {
+    import("@/lib/supabaseClient").then((m) => {
+      setSupabase(m.supabaseClient);
+    });
+  }, []);
+
   // 🔥 RECUPERO UTENTE + CREDITI
   useEffect(() => {
+    if (!supabase) return;
+
     async function loadUser() {
       const {
         data: { user },
@@ -28,7 +36,6 @@ export default function UploadPage() {
         return;
       }
 
-      // ✅ FIX TypeScript
       setEmail(user.email ?? null);
       setUserId(user.id);
 
@@ -38,149 +45,94 @@ export default function UploadPage() {
         .eq("user_id", user.id)
         .single();
 
-      if (error) {
-        console.error("Errore caricamento crediti:", error);
-        return;
+      if (!error) {
+        setCredits(data?.credits ?? 0);
       }
-
-      setCredits(data?.credits ?? 0);
     }
 
     loadUser();
   }, [supabase]);
 
-  // 🔥 ANALISI VIDEO + AGGIORNA CREDITI
+  // 🚀 ANALISI VIDEO
   async function analyzeVideo(url: string) {
-    if (!userId) {
-      alert("Errore: dati utente mancanti.");
+    if (!userId) return;
+
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, user_id: userId }),
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error);
       return;
     }
 
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url,
-          user_id: userId,
-        }),
-      });
+    setAiResponse(data.text);
 
-      const data = await res.json();
+    const { data: updated } = await supabase
+      .from("analisi_video")
+      .select("credits")
+      .eq("user_id", userId)
+      .single();
 
-      if (!data.success) {
-        alert("Errore durante l'analisi AI: " + data.error);
-        return;
-      }
-
-      setAiResponse(data.text);
-
-      const { data: newCredits, error: creditsErr } = await supabase
-        .from("analisi_video")
-        .select("credits")
-        .eq("user_id", userId)
-        .single();
-
-      if (!creditsErr && newCredits) {
-        setCredits(newCredits.credits);
-      }
-    } catch (err) {
-      console.error("AI error:", err);
-      alert("Errore nella chiamata AI");
-    }
+    setCredits(updated?.credits ?? 0);
   }
 
-  // 📤 UPLOAD VIDEO
+  // 📤 UPLOAD
   async function handleUpload() {
+    if (!file || !email || !userId) return;
+
     if (credits === 0) {
-      alert("❌ Non hai crediti disponibili.");
       window.location.href = "/pricing";
-      return;
-    }
-
-    if (!file) {
-      alert("Seleziona un file!");
-      return;
-    }
-
-    if (!email || !userId) {
-      alert("Errore: dati utente mancanti.");
       return;
     }
 
     setLoading(true);
     setAiResponse("");
 
-    try {
-      const data = new FormData();
-      data.append("file", file);
-      data.append("email", email);
-      data.append("user_id", userId);
+    const form = new FormData();
+    form.append("file", file);
+    form.append("email", email);
+    form.append("user_id", userId);
 
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: data,
-      });
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: form,
+    });
 
-      const json = await res.json();
+    const json = await res.json();
 
-      if (!json.success) {
-        alert("❌ Errore upload: " + json.error);
-        return;
-      }
-
-      alert("✅ Upload completato!");
-
-      if (json.url) {
-        await analyzeVideo(json.url);
-      }
-    } catch (err) {
-      console.error("Upload error:", err);
-      alert("Errore imprevisto.");
-    } finally {
-      setLoading(false);
+    if (json.success && json.url) {
+      await analyzeVideo(json.url);
+    } else {
+      alert(json.error);
     }
+
+    setLoading(false);
   }
 
-  if (credits === null) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          color: "white",
-          background: "#0d1117",
-        }}
-      >
-        Caricamento...
-      </main>
-    );
+  if (credits === null || !supabase) {
+    return <p style={{ color: "white" }}>Caricamento...</p>;
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        alignItems: "center",
-        padding: "40px 20px",
-        background: "#0d1117",
-        color: "white",
-      }}
-    >
-      <h1 style={{ fontSize: "2.4rem", fontWeight: 800 }}>
-        Carica un video
-      </h1>
+    <main style={{ minHeight: "100vh", background: "#0d1117", color: "white" }}>
+      <h1>Carica un video</h1>
+      <p>Crediti: {credits}</p>
 
-      <p style={{ opacity: 0.7 }}>
-        Crediti disponibili: <strong>{credits}</strong>
-      </p>
+      <input
+        type="file"
+        accept="video/*"
+        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+      />
 
-      {/* resto UI invariato */}
+      <button onClick={handleUpload} disabled={loading}>
+        {loading ? "Analisi..." : "Carica e analizza"}
+      </button>
+
+      {aiResponse && <pre>{aiResponse}</pre>}
     </main>
   );
 }
