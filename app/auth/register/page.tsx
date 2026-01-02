@@ -1,20 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { supabaseClient } from "@/lib/supabaseClient";
 
-// 🔴 BLOCCA IL PRERENDER IN BUILD (FIX DEFINITIVO)
+// 🔴 blocca il prerender
 export const dynamic = "force-dynamic";
 
 export default function RegisterPage() {
-  const supabase = supabaseClient;
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
+    if (loading) return;
+
     setError("");
+    setLoading(true);
+
+    // ✅ IMPORT SUPABASE SOLO A RUNTIME
+    const { supabaseClient } = await import("@/lib/supabaseClient");
+    const supabase = supabaseClient;
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -23,15 +28,18 @@ export default function RegisterPage() {
 
     if (error) {
       setError(error.message);
+      setLoading(false);
       return;
     }
 
-    // AGGIUNTA IN analisi_video
-    await supabase.from("analisi_video").insert({
-      user_id: data.user?.id,
-      crediti: 0,
-      mail: email,
-    });
+    // inserimento iniziale crediti
+    if (data.user) {
+      await supabase.from("analisi_video").insert({
+        user_id: data.user.id,
+        credits: 0,
+        email,
+      });
+    }
 
     window.location.href = "/auth/login";
   };
@@ -70,44 +78,31 @@ export default function RegisterPage() {
           Registrati
         </h1>
 
-        {/* EMAIL */}
         <label style={label}>Email</label>
         <input
           type="email"
-          placeholder="Inserisci la tua email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           style={input}
         />
 
-        {/* PASSWORD */}
         <label style={label}>Password</label>
         <input
           type="password"
-          placeholder="Crea una password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={input}
         />
 
-        {/* ERRORE */}
         {error && (
-          <p
-            style={{
-              color: "#ef4444",
-              marginTop: 10,
-              marginBottom: 5,
-              fontSize: ".95rem",
-              textAlign: "center",
-            }}
-          >
+          <p style={{ color: "#ef4444", marginTop: 10, textAlign: "center" }}>
             {error}
           </p>
         )}
 
-        {/* BUTTON */}
         <button
           onClick={handleRegister}
+          disabled={loading}
           style={{
             width: "100%",
             marginTop: 20,
@@ -118,13 +113,13 @@ export default function RegisterPage() {
             color: "white",
             fontSize: "1.1rem",
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.7 : 1,
           }}
         >
-          Crea account
+          {loading ? "Creazione..." : "Crea account"}
         </button>
 
-        {/* LOGIN LINK */}
         <p
           style={{
             marginTop: 18,
@@ -139,27 +134,4 @@ export default function RegisterPage() {
             style={{ color: "#3b82f6", textDecoration: "underline" }}
           >
             Accedi
-          </a>
-        </p>
-      </div>
-    </main>
-  );
-}
-
-const input = {
-  width: "100%",
-  padding: "12px",
-  borderRadius: 8,
-  border: "1px solid #374151",
-  background: "#1f2937",
-  color: "white",
-  marginBottom: 20,
-  fontSize: "1rem",
-};
-
-const label = {
-  display: "block",
-  marginBottom: 6,
-  fontSize: "1rem",
-  fontWeight: 600,
-};
+         
