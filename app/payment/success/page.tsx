@@ -2,33 +2,31 @@
 
 import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { supabaseClient } from "@/lib/supabaseClient";
 
-// 🔴 BLOCCA IL PRERENDER IN BUILD (FIX DEFINITIVO)
+// 🔴 BLOCCA IL PRERENDER (OBBLIGATORIO)
 export const dynamic = "force-dynamic";
 
 export default function PaymentSuccessPage() {
   const params = useSearchParams();
-  const supabase = supabaseClient;
 
   useEffect(() => {
     async function addCredits() {
       const pack = Number(params.get("pack"));
-
       if (!pack) return;
 
-      // Recupero user
+      // ✅ IMPORT SUPABASE SOLO A RUNTIME
+      const { supabaseClient } = await import("@/lib/supabaseClient");
+      const supabase = supabaseClient;
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        alert("Devi effettuare il login per completare l'acquisto.");
         window.location.href = "/auth/login";
         return;
       }
 
-      // Aggiungo i crediti
       const { error } = await supabase.rpc("increase_credits", {
         amount: pack,
       });
@@ -39,12 +37,11 @@ export default function PaymentSuccessPage() {
         return;
       }
 
-      alert(`🎉 Pagamento completato! Hai ricevuto ${pack} crediti.`);
       window.location.href = "/dashboard";
     }
 
     addCredits();
-  }, [params, supabase]);
+  }, [params]);
 
   return (
     <main
@@ -67,11 +64,11 @@ export default function PaymentSuccessPage() {
           boxShadow: "0 12px 25px rgba(0,0,0,.35)",
         }}
       >
-        <h1 style={{ fontSize: "2rem", fontWeight: 700, marginBottom: 10 }}>
+        <h1 style={{ fontSize: "2rem", fontWeight: 700 }}>
           Pagamento completato
         </h1>
-        <p style={{ opacity: 0.8 }}>
-          ⏳ Stiamo aggiungendo i tuoi crediti...
+        <p style={{ opacity: 0.8, marginTop: 10 }}>
+          ⏳ Stiamo accreditando i tuoi crediti...
         </p>
       </div>
     </main>
