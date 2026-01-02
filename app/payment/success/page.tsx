@@ -4,6 +4,9 @@ import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabaseClient } from "@/lib/supabaseClient";
 
+// 🔴 BLOCCA IL PRERENDER IN BUILD (FIX DEFINITIVO)
+export const dynamic = "force-dynamic";
+
 export default function PaymentSuccessPage() {
   const params = useSearchParams();
   const supabase = supabaseClient;
@@ -41,7 +44,7 @@ export default function PaymentSuccessPage() {
     }
 
     addCredits();
-  }, []);
+  }, [params, supabase]);
 
   return (
     <main
