@@ -1,16 +1,55 @@
 "use client"
 
-import { useCredits } from '@/hooks/useCredits'
+import { useEffect, useState, useCallback } from "react"
+import { supabaseClient } from "@/lib/supabaseClient"
 
-export default function Dashboard() {
-  const { credits, loading, decrement } = useCredits()
+export default function useCredits() {
+  const supabase = supabaseClient
 
-  if (loading) return <p>Carico...</p>
+  const [credits, setCredits] = useState<number>(0)
+  const [loading, setLoading] = useState<boolean>(true)
 
-  return (
-    <div>
-      <p>Crediti disponibili: {credits}</p>
-      <button onClick={() => decrement(1)}>Usa 1 credito</button>
-    </div>
-  )
+  useEffect(() => {
+    let mounted = true
+
+    async function loadCredits() {
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
+
+        if (userError || !user) {
+          if (mounted) setCredits(0)
+          return
+        }
+
+        const { data, error } = await supabase
+          .from("analisi_video")
+          .select("credits")
+          .eq("user_id", user.id)
+          .single()
+
+        if (!error && mounted) {
+          setCredits(data?.credits ?? 0)
+        }
+      } catch (err) {
+        console.error("Errore caricamento crediti:", err)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+
+    loadCredits()
+
+    return () => {
+      mounted = false
+    }
+  }, [supabase])
+
+  const decrement = useCallback((amount = 1) => {
+    setCredits((c) => Math.max(0, c - amount))
+  }, [])
+
+  return { credits, loading, decrement }
 }
