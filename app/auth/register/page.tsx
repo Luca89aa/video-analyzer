@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-// 🔴 blocca il prerender
+// 🔴 blocca prerender
 export const dynamic = "force-dynamic";
 
 export default function RegisterPage() {
@@ -17,7 +17,7 @@ export default function RegisterPage() {
     setError("");
     setLoading(true);
 
-    // ✅ IMPORT SUPABASE SOLO A RUNTIME
+    // ✅ import Supabase SOLO a runtime
     const { supabaseClient } = await import("@/lib/supabaseClient");
     const supabase = supabaseClient;
 
@@ -32,7 +32,6 @@ export default function RegisterPage() {
       return;
     }
 
-    // inserimento iniziale crediti
     if (data.user) {
       await supabase.from("analisi_video").insert({
         user_id: data.user.id,
@@ -95,7 +94,13 @@ export default function RegisterPage() {
         />
 
         {error && (
-          <p style={{ color: "#ef4444", marginTop: 10, textAlign: "center" }}>
+          <p
+            style={{
+              color: "#ef4444",
+              marginTop: 10,
+              textAlign: "center",
+            }}
+          >
             {error}
           </p>
         )}
@@ -134,4 +139,25 @@ export default function RegisterPage() {
             style={{ color: "#3b82f6", textDecoration: "underline" }}
           >
             Accedi
-         
+          </a>
+        </p>
+      </div>
+    </main>
+  );
+}
+
+const input = {
+  width: "100%",
+  padding: "12px",
+  borderRadius: 8,
+  border: "1px solid #374151",
+  background: "#1f2937",
+  color: "white",
+  marginBottom: 20,
+};
+
+const label = {
+  display: "block",
+  marginBottom: 6,
+  fontWeight: 600,
+};
