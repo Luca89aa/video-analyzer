@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { supabaseClient } from "@/lib/supabaseClient";
 
+// 🔴 BLOCCA IL PRERENDER IN BUILD (FIX DEFINITIVO)
+export const dynamic = "force-dynamic";
+
 export default function RegisterPage() {
   const supabase = supabaseClient;
 
@@ -116,7 +119,6 @@ export default function RegisterPage() {
             fontSize: "1.1rem",
             fontWeight: 700,
             cursor: "pointer",
-            transition: "0.2s",
           }}
         >
           Crea account
