@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 
-// 🔴 BLOCCA IL PRERENDER (OBBLIGATORIO)
+// 🔴 BLOCCA IL PRERENDER
 export const dynamic = "force-dynamic";
 
-export default function PaymentSuccessPage() {
+function PaymentSuccessInner() {
   const params = useSearchParams();
 
   useEffect(() => {
@@ -14,7 +14,7 @@ export default function PaymentSuccessPage() {
       const pack = Number(params.get("pack"));
       if (!pack) return;
 
-      // ✅ IMPORT SUPABASE SOLO A RUNTIME
+      // ✅ SUPABASE SOLO A RUNTIME
       const { supabaseClient } = await import("@/lib/supabaseClient");
       const supabase = supabaseClient;
 
@@ -44,6 +44,27 @@ export default function PaymentSuccessPage() {
   }, [params]);
 
   return (
+    <div
+      style={{
+        textAlign: "center",
+        background: "#111827",
+        padding: "40px 30px",
+        borderRadius: "14px",
+        boxShadow: "0 12px 25px rgba(0,0,0,.35)",
+      }}
+    >
+      <h1 style={{ fontSize: "2rem", fontWeight: 700 }}>
+        Pagamento completato
+      </h1>
+      <p style={{ opacity: 0.8, marginTop: 10 }}>
+        ⏳ Stiamo accreditando i tuoi crediti...
+      </p>
+    </div>
+  );
+}
+
+export default function PaymentSuccessPage() {
+  return (
     <main
       style={{
         minHeight: "100vh",
@@ -55,22 +76,9 @@ export default function PaymentSuccessPage() {
         fontFamily: "system-ui",
       }}
     >
-      <div
-        style={{
-          textAlign: "center",
-          background: "#111827",
-          padding: "40px 30px",
-          borderRadius: "14px",
-          boxShadow: "0 12px 25px rgba(0,0,0,.35)",
-        }}
-      >
-        <h1 style={{ fontSize: "2rem", fontWeight: 700 }}>
-          Pagamento completato
-        </h1>
-        <p style={{ opacity: 0.8, marginTop: 10 }}>
-          ⏳ Stiamo accreditando i tuoi crediti...
-        </p>
-      </div>
+      <Suspense fallback={<p>Caricamento...</p>}>
+        <PaymentSuccessInner />
+      </Suspense>
     </main>
   );
 }
