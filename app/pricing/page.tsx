@@ -158,9 +158,9 @@ export default function PaymentsPage() {
   );
 }
 
-/* === STYLES === */
+/* === STYLES (FIX DEFINITIVO TS) === */
 
-const card: CSSProperties = {
+const card = {
   padding: "30px",
   borderRadius: "14px",
   background: "#0f1629",
@@ -168,32 +168,32 @@ const card: CSSProperties = {
   boxShadow: "0 12px 32px rgba(0,0,0,.3)",
   textAlign: "center",
   display: "flex",
-  flexDirection: "column" as const, // 🔑 FIX DEFINITIVO
+  flexDirection: "column",
   minHeight: "350px",
-};
+} satisfies CSSProperties;
 
-const cardSpecial: CSSProperties = {
+const cardSpecial = {
   ...card,
   border: "2px solid #3b82f6",
-};
+} satisfies CSSProperties;
 
-const title: CSSProperties = {
+const title = {
   fontSize: "1.5rem",
   marginBottom: 5,
-};
+} satisfies CSSProperties;
 
-const price: CSSProperties = {
+const price = {
   fontSize: "2.2rem",
   fontWeight: 800,
   margin: "15px 0",
-};
+} satisfies CSSProperties;
 
-const desc: CSSProperties = {
+const desc = {
   opacity: 0.75,
   marginBottom: 25,
-};
+} satisfies CSSProperties;
 
-const btn: CSSProperties = {
+const btn = {
   width: "100%",
   padding: "14px",
   borderRadius: "10px",
@@ -203,9 +203,9 @@ const btn: CSSProperties = {
   fontSize: "1rem",
   cursor: "pointer",
   fontWeight: 700,
-};
+} satisfies CSSProperties;
 
-const btnSpecial: CSSProperties = {
+const btnSpecial = {
   ...btn,
   background: "#3b82f6",
-};
+} satisfies CSSProperties;
