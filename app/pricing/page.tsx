@@ -1,3 +1,5 @@
+import { CSSProperties } from "react";
+
 export default function PaymentsPage() {
   return (
     <main
@@ -47,8 +49,6 @@ export default function PaymentsPage() {
             <input type="hidden" name="cmd" value="_s-xclick" />
             <input type="hidden" name="hosted_button_id" value="TGN8YDER4R258" />
             <input type="hidden" name="currency_code" value="EUR" />
-
-            {/* RETURN */}
             <input
               type="hidden"
               name="return"
@@ -74,8 +74,6 @@ export default function PaymentsPage() {
             <input type="hidden" name="cmd" value="_s-xclick" />
             <input type="hidden" name="hosted_button_id" value="CSJPDWHV5P22L" />
             <input type="hidden" name="currency_code" value="EUR" />
-
-            {/* RETURN */}
             <input
               type="hidden"
               name="return"
@@ -101,8 +99,6 @@ export default function PaymentsPage() {
             <input type="hidden" name="cmd" value="_s-xclick" />
             <input type="hidden" name="hosted_button_id" value="PX2MVFSBL7W5G" />
             <input type="hidden" name="currency_code" value="EUR" />
-
-            {/* RETURN */}
             <input
               type="hidden"
               name="return"
@@ -128,8 +124,6 @@ export default function PaymentsPage() {
             <input type="hidden" name="cmd" value="_s-xclick" />
             <input type="hidden" name="hosted_button_id" value="9A4HDSCXUF9U6" />
             <input type="hidden" name="currency_code" value="EUR" />
-
-            {/* RETURN */}
             <input
               type="hidden"
               name="return"
@@ -155,8 +149,6 @@ export default function PaymentsPage() {
             <input type="hidden" name="cmd" value="_s-xclick" />
             <input type="hidden" name="hosted_button_id" value="VQYV8839QN7HQ" />
             <input type="hidden" name="currency_code" value="EUR" />
-
-            {/* RETURN */}
             <input
               type="hidden"
               name="return"
@@ -173,7 +165,7 @@ export default function PaymentsPage() {
 
 /* === STYLE === */
 
-const card = {
+const card: CSSProperties = {
   padding: "30px",
   borderRadius: "14px",
   background: "#0f1629",
@@ -185,28 +177,28 @@ const card = {
   minHeight: "350px",
 };
 
-const cardSpecial = {
+const cardSpecial: CSSProperties = {
   ...card,
   border: "2px solid #3b82f6",
 };
 
-const title = {
+const title: CSSProperties = {
   fontSize: "1.5rem",
   marginBottom: 5,
 };
 
-const price = {
+const price: CSSProperties = {
   fontSize: "2.2rem",
   fontWeight: 800,
   margin: "15px 0",
 };
 
-const desc = {
+const desc: CSSProperties = {
   opacity: 0.75,
   marginBottom: 25,
 };
 
-const btn = {
+const btn: CSSProperties = {
   width: "100%",
   padding: "14px",
   borderRadius: "10px",
@@ -219,7 +211,7 @@ const btn = {
   transition: "0.2s",
 };
 
-const btnSpecial = {
+const btnSpecial: CSSProperties = {
   ...btn,
   background: "#3b82f6",
 };
