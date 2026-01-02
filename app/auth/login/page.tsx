@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { supabaseClient } from "@/lib/supabaseClient";
 
+// 🔴 IMPEDISCE IL PRERENDER IN BUILD (FIX DEFINITIVO)
+export const dynamic = "force-dynamic";
+
 export default function LoginPage() {
   const supabase = supabaseClient;
 
@@ -70,7 +73,7 @@ export default function LoginPage() {
           style={input}
         />
 
-        {/* PASS */}
+        {/* PASSWORD */}
         <label style={label}>Password</label>
         <input
           type="password"
@@ -109,13 +112,12 @@ export default function LoginPage() {
             fontSize: "1.1rem",
             fontWeight: 700,
             cursor: "pointer",
-            transition: "0.2s",
           }}
         >
           Login
         </button>
 
-        {/* LINKS */}
+        {/* LINK REGISTER */}
         <p
           style={{
             marginTop: 18,
@@ -132,7 +134,6 @@ export default function LoginPage() {
             Registrati
           </a>
         </p>
-
       </div>
     </main>
   );
