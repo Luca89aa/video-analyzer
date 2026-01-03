@@ -1,61 +1,150 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const ROUTE_VERSION = "ANALYZE-GENAI-V1";
+const ROUTE_VERSION = "ANALYZE-REST-FILES-V5";
 
-// ---------- utils ----------
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function normalizeMimeType(ct: string | null) {
   if (!ct) return "video/mp4";
   const clean = ct.split(";")[0].trim().toLowerCase();
-
-  // spesso r2/s3 torna octet-stream -> meglio mp4
-  if (clean === "application/octet-stream") return "video/mp4";
-
-  // se è html/json, NON è un video
-  if (clean.includes("text/html")) return "text/html";
-  if (clean.includes("application/json")) return "application/json";
-
-  // deve contenere "/"
   if (!clean.includes("/")) return "video/mp4";
-
+  if (clean === "application/octet-stream") return "video/mp4";
   return clean;
 }
 
-function guessVideoMimeFromUrl(url: string) {
-  const u = url.toLowerCase();
-  if (u.includes(".webm")) return "video/webm";
-  if (u.includes(".mov")) return "video/quicktime";
-  if (u.includes(".m4v")) return "video/x-m4v";
-  return "video/mp4";
-}
-
-function safePreview(buf: Buffer) {
-  // preview ASCII per capire se è HTML/JSON
-  const txt = buf.toString("utf8", 0, Math.min(buf.length, 200));
-  return txt.replace(/\s+/g, " ").slice(0, 200);
-}
-
-// ---------- health GET ----------
-export async function GET() {
-  return NextResponse.json(
-    { ok: true, routeVersion: ROUTE_VERSION },
+async function filesStart(apiKey: string, size: number, mimeType: string) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
     {
-      status: 200,
+      method: "POST",
       headers: {
-        "Cache-Control": "no-store",
-        "x-route-version": ROUTE_VERSION,
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(size),
+        "X-Goog-Upload-Header-Content-Type": mimeType,
+        "Content-Type": "application/json",
       },
+      // ✅ camelCase per REST
+      body: JSON.stringify({ file: { displayName: "VIDEO" } }),
     }
+  );
+
+  const uploadUrl = res.headers.get("x-goog-upload-url");
+  if (!res.ok || !uploadUrl) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Files start failed: ${res.status} ${res.statusText} ${t}`);
+  }
+
+  return uploadUrl;
+}
+
+async function filesUploadFinalize(uploadUrl: string, buf: Buffer) {
+  const res = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Length": String(buf.byteLength),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+    body: buf,
+  });
+
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok || !json?.file?.name || !json?.file?.uri) {
+    throw new Error(
+      `Files upload failed: ${res.status} ${res.statusText} ${JSON.stringify(json)}`
+    );
+  }
+
+  return {
+    fileName: json.file.name as string, // "files/..."
+    fileUri: json.file.uri as string, // "https://.../v1beta/files/..."
+    mimeType: (json.file.mimeType as string | undefined) || undefined,
+    state: (json.file.state as string | undefined) || undefined,
+  };
+}
+
+async function filesGet(apiKey: string, fileName: string) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`
+  );
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok || !json?.file) {
+    throw new Error(
+      `files.get failed: ${res.status} ${res.statusText} ${JSON.stringify(json)}`
+    );
+  }
+
+  return json.file as {
+    name: string;
+    uri: string;
+    mimeType?: string;
+    state?: string;
+  };
+}
+
+async function geminiGenerate(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  fileUri: string,
+  mimeType: string
+) {
+  // ✅ camelCase richiesto dalla REST API
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { fileData: { fileUri, mimeType } },
+          { text: prompt },
+        ],
+      },
+    ],
+  };
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    // ✅ qui c’è l’errore VERO con dettagli
+    throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+  }
+
+  return (
+    json?.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p?.text)
+      .filter(Boolean)
+      .join("\n") || ""
   );
 }
 
-// ---------- main ----------
+// ✅ GET 200: verifica facile routeVersion
+export async function GET() {
+  return NextResponse.json(
+    { ok: true, routeVersion: ROUTE_VERSION },
+    { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+  );
+}
+
 export async function POST(req: Request) {
   console.log("✅ ANALYZE HIT", ROUTE_VERSION, new Date().toISOString());
 
@@ -63,7 +152,7 @@ export async function POST(req: Request) {
   if (!GEMINI_API_KEY) {
     return NextResponse.json(
       { success: false, error: "Missing GEMINI_API_KEY", routeVersion: ROUTE_VERSION },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
     );
   }
 
@@ -72,8 +161,15 @@ export async function POST(req: Request) {
 
   const refund = async () => {
     if (!userId || !creditScaled) return;
-    // decrease_credits: credits = credits - amount → amount note: -1 = +1 credito
-    await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: -1 }).catch(() => null);
+    try {
+      const { error } = await supabaseAdmin.rpc("decrease_credits", {
+        uid: userId,
+        amount: -1,
+      });
+      if (error) console.warn("REFUND RPC error:", error.message);
+    } catch (e: any) {
+      console.warn("REFUND exception:", e?.message || String(e));
+    }
   };
 
   try {
@@ -87,9 +183,10 @@ export async function POST(req: Request) {
     if (authErr || !user) {
       return NextResponse.json(
         { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
-        { status: 401 }
+        { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
+
     userId = user.id;
 
     // 2) Payload
@@ -99,13 +196,13 @@ export async function POST(req: Request) {
     if (!videoUrl) {
       return NextResponse.json(
         { success: false, error: "Missing videoUrl", routeVersion: ROUTE_VERSION },
-        { status: 400 }
+        { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
 
     console.log("ANALYZE videoUrl:", videoUrl);
 
-    // 3) Scala 1 credito (prima dell’analisi)
+    // 3) Scala 1 credito
     const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", {
       uid: userId,
       amount: 1,
@@ -116,91 +213,77 @@ export async function POST(req: Request) {
       if (msg.includes("esauriti") || msg.includes("nessun credito")) {
         return NextResponse.json(
           { success: false, error: "Crediti esauriti", redirect: "/pricing", routeVersion: ROUTE_VERSION },
-          { status: 403 }
+          { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
         );
       }
+
       return NextResponse.json(
         { success: false, error: rpcErr.message || "Credits error", routeVersion: ROUTE_VERSION },
-        { status: 403 }
+        { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
 
     creditScaled = true;
 
-    // 4) Scarica video (IMPORTANTISSIMO: su Vercel può tornare HTML/403/404)
-    const vidRes = await fetch(videoUrl, {
-      cache: "no-store",
-      redirect: "follow",
-      headers: {
-        // aiuta alcuni bucket/CDN
-        "User-Agent": "video-analyzer/1.0",
-        Accept: "video/*,*/*;q=0.8",
-      },
-    });
-
-    console.log("ANALYZE fetch status:", vidRes.status, vidRes.statusText);
-
+    // 4) Scarica video
+    const vidRes = await fetch(videoUrl, { cache: "no-store", redirect: "follow" });
     if (!vidRes.ok) {
       await refund();
       return NextResponse.json(
-        {
-          success: false,
-          error: `Video fetch failed: ${vidRes.status} ${vidRes.statusText}`,
-          routeVersion: ROUTE_VERSION,
-        },
-        { status: 400 }
+        { success: false, error: `Video fetch failed: ${vidRes.status} ${vidRes.statusText}`, routeVersion: ROUTE_VERSION },
+        { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
 
     const rawCt = vidRes.headers.get("content-type");
-    const ct = normalizeMimeType(rawCt);
+    const mimeType = normalizeMimeType(rawCt);
 
     console.log("ANALYZE content-type:", rawCt);
-    console.log("ANALYZE normalized:", ct);
+    console.log("ANALYZE normalized mimeType:", mimeType);
+
+    if (!mimeType.startsWith("video/")) {
+      await refund();
+      return NextResponse.json(
+        {
+          success: false,
+          error: "URL non restituisce un video",
+          details: `content-type=${rawCt || "null"}`,
+          routeVersion: ROUTE_VERSION,
+        },
+        { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+      );
+    }
 
     const ab = await vidRes.arrayBuffer();
     const buf = Buffer.from(ab);
 
     console.log("ANALYZE bytes:", buf.byteLength);
 
-    // 🔥 guardrail: se è HTML/JSON, stai scaricando una pagina, non il video
-    if (ct === "text/html" || ct === "application/json") {
+    // 5) Upload Files API
+    const uploadUrl = await filesStart(GEMINI_API_KEY, buf.byteLength, mimeType);
+    const uploaded = await filesUploadFinalize(uploadUrl, buf);
+
+    console.log("ANALYZE uploaded fileName:", uploaded.fileName);
+    console.log("ANALYZE uploaded fileUri:", uploaded.fileUri);
+    console.log("ANALYZE uploaded mimeType:", uploaded.mimeType);
+
+    // 6) Wait ACTIVE (video spesso PROCESSING)
+    let file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
+    const start = Date.now();
+
+    while (file.state === "PROCESSING" && Date.now() - start < 55_000) {
+      console.log("ANALYZE file state:", file.state);
+      await sleep(4000);
+      file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
+    }
+
+    if (file.state !== "ACTIVE") {
       await refund();
       return NextResponse.json(
-        {
-          success: false,
-          error: "URL non restituisce un file video (torna HTML/JSON)",
-          details: { contentType: rawCt, preview: safePreview(buf) },
-          routeVersion: ROUTE_VERSION,
-        },
-        { status: 400 }
+        { success: false, error: "Video non pronto (Files API non ACTIVE)", details: file, routeVersion: ROUTE_VERSION },
+        { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
-
-    // se content-type non è video/* ma sembra un mp4, proviamo lo stesso con fallback
-    let mimeType = ct;
-    if (!mimeType.startsWith("video/")) {
-      mimeType = guessVideoMimeFromUrl(videoUrl);
-      console.log("ANALYZE mimeType fallback:", mimeType);
-    }
-
-    // hard limit: evita request troppo grandi a Gemini
-    const MAX_VIDEO_BYTES = 18 * 1024 * 1024; // 18MB
-    if (buf.byteLength > MAX_VIDEO_BYTES) {
-      await refund();
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Video troppo grande per l’analisi (max ~18MB). Riduci durata/risoluzione.",
-          details: { bytes: buf.byteLength },
-          routeVersion: ROUTE_VERSION,
-        },
-        { status: 400 }
-      );
-    }
-
-    // 5) Gemini multimodal (come in locale)
-    const base64Video = buf.toString("base64");
 
     const prompt = `
 You are a TikTok video analyst.
@@ -214,29 +297,20 @@ Write in Italian.
 `.trim();
 
     try {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            data: base64Video,
-            mimeType,
-          },
-        },
-        { text: prompt },
-      ]);
-
-      const text = result.response.text();
+      const text = await geminiGenerate(
+        GEMINI_API_KEY,
+        "gemini-2.0-flash",
+        prompt,
+        file.uri,
+        file.mimeType || mimeType
+      );
 
       return NextResponse.json(
-        { success: true, routeVersion: ROUTE_VERSION, mimeType, bytes: buf.byteLength, text },
+        { success: true, routeVersion: ROUTE_VERSION, text },
         { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     } catch (e: any) {
       await refund();
-      console.error("GEMINI ERROR:", e?.message || e);
-
       return NextResponse.json(
         { success: false, error: "Gemini error", details: e?.message || String(e), routeVersion: ROUTE_VERSION },
         { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
@@ -245,7 +319,6 @@ Write in Italian.
   } catch (err: any) {
     await refund();
     console.error("ANALYZE ERROR:", err);
-
     return NextResponse.json(
       { success: false, error: "Analyze failed", details: err?.message || String(err), routeVersion: ROUTE_VERSION },
       { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
