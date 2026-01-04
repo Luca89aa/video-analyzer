@@ -6,8 +6,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const ROUTE_VERSION = "ANALYZE-REST-FILES-V5";
+const ROUTE_VERSION = "ANALYZE-REST-FILES-V6";
 
+// -------------------- utils --------------------
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -20,6 +21,15 @@ function normalizeMimeType(ct: string | null) {
   return clean;
 }
 
+function safeJsonStringify(obj: any) {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return String(obj);
+  }
+}
+
+// -------------------- Gemini Files API --------------------
 async function filesStart(apiKey: string, size: number, mimeType: string) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
@@ -32,7 +42,7 @@ async function filesStart(apiKey: string, size: number, mimeType: string) {
         "X-Goog-Upload-Header-Content-Type": mimeType,
         "Content-Type": "application/json",
       },
-      // REST API vuole camelCase
+      // JSON mapping: displayName (camelCase)
       body: JSON.stringify({ file: { displayName: "VIDEO" } }),
     }
   );
@@ -46,34 +56,29 @@ async function filesStart(apiKey: string, size: number, mimeType: string) {
   return uploadUrl;
 }
 
-async function filesUploadFinalize(uploadUrl: string, buf: Buffer) {
-  // ✅ FIX TS: fetch() body NON accetta Buffer nei tipi DOM
+async function filesUploadFinalize(uploadUrl: string, bytes: Uint8Array) {
   const res = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Content-Length": String(buf.byteLength),
+      "Content-Length": String(bytes.byteLength),
       "X-Goog-Upload-Offset": "0",
       "X-Goog-Upload-Command": "upload, finalize",
     },
-    body: new Uint8Array(buf),
+    // ✅ TS-safe body (no Buffer)
+    body: bytes,
   });
 
-  let json: any = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
+  const json = await res.json().catch(() => null);
 
   if (!res.ok || !json?.file?.name || !json?.file?.uri) {
     throw new Error(
-      `Files upload failed: ${res.status} ${res.statusText} ${JSON.stringify(json)}`
+      `Files upload failed: ${res.status} ${res.statusText} ${safeJsonStringify(json)}`
     );
   }
 
   return {
-    fileName: json.file.name as string, // "files/..."
-    fileUri: json.file.uri as string, // "https://.../v1beta/files/..."
+    fileName: json.file.name as string, // e.g. "files/abc123"
+    fileUri: json.file.uri as string, // e.g. "https://.../v1beta/files/abc123"
     mimeType: (json.file.mimeType as string | undefined) || undefined,
     state: (json.file.state as string | undefined) || undefined,
   };
@@ -84,23 +89,18 @@ async function filesGet(apiKey: string, fileName: string) {
     `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`,
     { cache: "no-store" }
   );
-
-  let json: any = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
+  const json = await res.json().catch(() => null);
 
   if (!res.ok || !json?.file) {
     throw new Error(
-      `files.get failed: ${res.status} ${res.statusText} ${JSON.stringify(json)}`
+      `files.get failed: ${res.status} ${res.statusText} ${safeJsonStringify(json)}`
     );
   }
 
   return json.file as { name: string; uri: string; mimeType?: string; state?: string };
 }
 
+// -------------------- Gemini generateContent (REST) --------------------
 async function geminiGenerate(
   apiKey: string,
   model: string,
@@ -108,12 +108,15 @@ async function geminiGenerate(
   fileUri: string,
   mimeType: string
 ) {
-  // ✅ REST: fileData/fileUri/mimeType in camelCase
+  // ✅ JSON mapping: fileData { fileUri, mimeType }
   const body = {
     contents: [
       {
         role: "user",
-        parts: [{ fileData: { fileUri, mimeType } }, { text: prompt }],
+        parts: [
+          { fileData: { fileUri, mimeType } },
+          { text: prompt },
+        ],
       },
     ],
   };
@@ -127,16 +130,11 @@ async function geminiGenerate(
     }
   );
 
-  let json: any = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
+  const json = await res.json().catch(() => null);
 
   if (!res.ok) {
-    // qui c’è il motivo vero (message ecc.)
-    throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+    // ritorna l'errore "vero" (message, details, ecc.)
+    throw new Error(`Gemini ${res.status}: ${safeJsonStringify(json)}`);
   }
 
   const text =
@@ -148,7 +146,8 @@ async function geminiGenerate(
   return text;
 }
 
-// ✅ GET 200 per test “route giusta”
+// -------------------- route --------------------
+// GET 200 per verificare subito che stai colpendo questa route (niente 405/HTML)
 export async function GET() {
   return NextResponse.json(
     { ok: true, routeVersion: ROUTE_VERSION },
@@ -172,16 +171,12 @@ export async function POST(req: Request) {
 
   const refund = async () => {
     if (!userId || !creditScaled) return;
-    // niente .catch() su rpc (TS)
-    try {
-      await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: -1 });
-    } catch {
-      // ignore
-    }
+    const { error } = await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: -1 });
+    if (error) console.error("⚠️ REFUND RPC ERROR:", error);
   };
 
   try {
-    // 1) Auth cookie/session
+    // 1) Auth via cookie/session
     const supabase = createServerSupabase();
     const {
       data: { user },
@@ -211,25 +206,16 @@ export async function POST(req: Request) {
     console.log("ANALYZE videoUrl:", videoUrl);
 
     // 3) Scala 1 credito
-    const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", {
-      uid: userId,
-      amount: 1,
-    });
+    const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: 1 });
 
     if (rpcErr) {
       const msg = (rpcErr.message || "").toLowerCase();
       if (msg.includes("esauriti") || msg.includes("nessun credito")) {
         return NextResponse.json(
-          {
-            success: false,
-            error: "Crediti esauriti",
-            redirect: "/pricing",
-            routeVersion: ROUTE_VERSION,
-          },
+          { success: false, error: "Crediti esauriti", redirect: "/pricing", routeVersion: ROUTE_VERSION },
           { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
         );
       }
-
       return NextResponse.json(
         { success: false, error: rpcErr.message || "Credits error", routeVersion: ROUTE_VERSION },
         { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
@@ -238,16 +224,12 @@ export async function POST(req: Request) {
 
     creditScaled = true;
 
-    // 4) Scarica video
+    // 4) Scarica video dal link pubblico
     const vidRes = await fetch(videoUrl, { cache: "no-store", redirect: "follow" });
     if (!vidRes.ok) {
       await refund();
       return NextResponse.json(
-        {
-          success: false,
-          error: `Video fetch failed: ${vidRes.status} ${vidRes.statusText}`,
-          routeVersion: ROUTE_VERSION,
-        },
+        { success: false, error: `Video fetch failed: ${vidRes.status} ${vidRes.statusText}`, routeVersion: ROUTE_VERSION },
         { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
@@ -258,13 +240,15 @@ export async function POST(req: Request) {
     console.log("ANALYZE content-type:", rawCt);
     console.log("ANALYZE normalized mimeType:", mimeType);
 
+    // se arriva HTML/JSON mascherato, fermiamo subito
     if (!mimeType.startsWith("video/")) {
+      const snippet = await vidRes.text().catch(() => "");
       await refund();
       return NextResponse.json(
         {
           success: false,
           error: "URL non restituisce un video",
-          details: `content-type=${rawCt || "null"}`,
+          details: { contentType: rawCt, bodySnippet: snippet.slice(0, 300) },
           routeVersion: ROUTE_VERSION,
         },
         { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
@@ -272,25 +256,27 @@ export async function POST(req: Request) {
     }
 
     const ab = await vidRes.arrayBuffer();
-    const buf = Buffer.from(ab);
+    const bytes = new Uint8Array(ab);
 
-    console.log("ANALYZE bytes:", buf.byteLength);
+    console.log("ANALYZE bytes:", bytes.byteLength);
 
     // 5) Upload Files API
-    const uploadUrl = await filesStart(GEMINI_API_KEY, buf.byteLength, mimeType);
-    const uploaded = await filesUploadFinalize(uploadUrl, buf);
+    const uploadUrl = await filesStart(GEMINI_API_KEY, bytes.byteLength, mimeType);
+    const uploaded = await filesUploadFinalize(uploadUrl, bytes);
 
     console.log("ANALYZE uploaded:", uploaded);
 
-    // 6) Wait ACTIVE (spesso necessario per video)
+    // 6) Attendi ACTIVE (video spesso PROCESSING)
     let file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
-    const start = Date.now();
+    const started = Date.now();
 
-    while (file.state === "PROCESSING" && Date.now() - start < 55_000) {
-      console.log("ANALYZE processing...", file.state);
-      await sleep(4000);
+    while (file.state === "PROCESSING" && Date.now() - started < 55_000) {
+      console.log("ANALYZE file state:", file.state);
+      await sleep(3000);
       file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
     }
+
+    console.log("ANALYZE file final state:", file.state);
 
     if (file.state !== "ACTIVE") {
       await refund();
@@ -305,7 +291,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 7) Prompt + generate
+    // 7) Prompt + generate (con fallback automatico)
     const prompt = `
 You are a TikTok video analyst.
 Return:
@@ -317,25 +303,50 @@ Return:
 Write in Italian.
 `.trim();
 
+    const fileUri = file.uri;
+    const fileMime = file.mimeType || mimeType;
+
     try {
-      const text = await geminiGenerate(
-        GEMINI_API_KEY,
-        "gemini-2.0-flash",
-        prompt,
-        file.uri,
-        file.mimeType || mimeType
-      );
+      // prima prova 2.0
+      let text = await geminiGenerate(GEMINI_API_KEY, "gemini-2.0-flash", prompt, fileUri, fileMime);
+
+      // se dovesse tornare vuoto (capita raramente), riprova 1.5
+      if (!text?.trim()) {
+        console.log("ANALYZE empty response from 2.0, retrying 1.5-flash");
+        text = await geminiGenerate(GEMINI_API_KEY, "gemini-1.5-flash", prompt, fileUri, fileMime);
+      }
 
       return NextResponse.json(
         { success: true, routeVersion: ROUTE_VERSION, text },
         { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
-    } catch (e: any) {
-      await refund();
-      return NextResponse.json(
-        { success: false, error: "Gemini error", details: e?.message || String(e), routeVersion: ROUTE_VERSION },
-        { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-      );
+    } catch (e2: any) {
+      // se 2.0 fallisce, prova 1.5-flash prima di rimborsare
+      const firstErr = e2?.message || String(e2);
+      console.error("ANALYZE Gemini 2.0 error:", firstErr);
+
+      try {
+        const text = await geminiGenerate(GEMINI_API_KEY, "gemini-1.5-flash", prompt, fileUri, fileMime);
+
+        return NextResponse.json(
+          { success: true, routeVersion: ROUTE_VERSION, text, note: "fallback gemini-1.5-flash" },
+          { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+        );
+      } catch (e3: any) {
+        await refund();
+        const secondErr = e3?.message || String(e3);
+        console.error("ANALYZE Gemini 1.5 error:", secondErr);
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Gemini error",
+            details: { gemini2: firstErr, gemini15: secondErr },
+            routeVersion: ROUTE_VERSION,
+          },
+          { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+        );
+      }
     }
   } catch (err: any) {
     await refund();
