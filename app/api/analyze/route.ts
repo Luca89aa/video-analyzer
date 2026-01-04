@@ -32,17 +32,14 @@ function pickEnv(...keys: string[]) {
 export async function GET() {
   return NextResponse.json(
     { ok: true, routeVersion: ROUTE_VERSION },
-    {
-      status: 200,
-      headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-    }
+    { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
   );
 }
 
 export async function POST(req: Request) {
   try {
     // 1) Auth: cookie -> Bearer
-    const supabase = createServerSupabase();
+    const supabase = await createServerSupabase(); // ✅ IMPORTANT: await
     const { data: cookieAuth } = await supabase.auth.getUser();
     let userId = cookieAuth?.user?.id ?? null;
 
@@ -51,10 +48,7 @@ export async function POST(req: Request) {
       if (!token) {
         return NextResponse.json(
           { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
-          {
-            status: 401,
-            headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-          }
+          { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
         );
       }
 
@@ -62,10 +56,7 @@ export async function POST(req: Request) {
       if (error || !data?.user?.id) {
         return NextResponse.json(
           { success: false, error: "Not authenticated", details: error?.message, routeVersion: ROUTE_VERSION },
-          {
-            status: 401,
-            headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-          }
+          { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
         );
       }
       userId = data.user.id;
@@ -78,26 +69,15 @@ export async function POST(req: Request) {
     if (!file) {
       return NextResponse.json(
         { success: false, error: "Missing file", routeVersion: ROUTE_VERSION },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-        }
+        { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
 
     const contentType = (file.type || "video/mp4").split(";")[0].trim().toLowerCase();
     if (!contentType.startsWith("video/")) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "File is not a video",
-          details: `content-type=${contentType}`,
-          routeVersion: ROUTE_VERSION,
-        },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-        }
+        { success: false, error: "File is not a video", details: `content-type=${contentType}`, routeVersion: ROUTE_VERSION },
+        { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
 
@@ -120,10 +100,7 @@ export async function POST(req: Request) {
     if (missing.length) {
       return NextResponse.json(
         { success: false, error: "Missing R2 envs", missing, routeVersion: ROUTE_VERSION },
-        {
-          status: 500,
-          headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-        }
+        { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
 
@@ -138,9 +115,7 @@ export async function POST(req: Request) {
     });
 
     const ab = await file.arrayBuffer();
-
-    // ✅ TS-safe Body per PutObjectCommand su Vercel/Next
-    const body = Buffer.from(ab);
+    const body = Buffer.from(ab); // ✅ TS-safe per PutObjectCommand
 
     const key = `videos/${userId}/${Date.now()}-${randomUUID()}-${safeFilename(file.name)}`;
 
@@ -150,7 +125,6 @@ export async function POST(req: Request) {
         Key: key,
         Body: body,
         ContentType: contentType,
-        // opzionale ma utile:
         CacheControl: "public, max-age=31536000, immutable",
       })
     );
@@ -160,18 +134,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json(
       { success: true, routeVersion: ROUTE_VERSION, url },
-      {
-        status: 200,
-        headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-      }
+      { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
     );
   } catch (err: any) {
     return NextResponse.json(
       { success: false, error: "Upload failed", details: err?.message || String(err), routeVersion: ROUTE_VERSION },
-      {
-        status: 500,
-        headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION },
-      }
+      { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
     );
   }
 }
