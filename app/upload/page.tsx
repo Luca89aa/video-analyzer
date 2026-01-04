@@ -70,7 +70,7 @@ export default function UploadPage() {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: "include",
-      body: JSON.stringify({ videoUrl }),
+      body: JSON.stringify({ videoUrl, accessToken: token }),
     });
 
     const data = await res.json().catch(() => ({}));

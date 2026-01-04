@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const ROUTE_VERSION = "ANALYZE-REST-FILES-V8";
+const ROUTE_VERSION = "ANALYZE-REST-FILES-V9";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -15,31 +15,21 @@ function sleep(ms: number) {
 function normalizeMimeType(ct: string | null) {
   if (!ct) return "video/mp4";
   const clean = ct.split(";")[0].trim().toLowerCase();
-  if (!clean.includes("/")) return "video/mp4";
   if (clean === "application/octet-stream") return "video/mp4";
+  if (!clean.includes("/")) return "video/mp4";
   return clean;
 }
 
-/**
- * Auth: cookie/session first, then Bearer fallback.
- * Returns userId or null.
- */
-async function resolveUserId(req: Request): Promise<string | null> {
-  const supabase = createServerSupabase();
-  const { data } = await supabase.auth.getUser();
-  if (data?.user?.id) return data.user.id;
-
-  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  if (!token) return null;
-
-  const { data: adminData, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !adminData?.user?.id) return null;
-  return adminData.user.id;
+function getBearerTokenFromHeader(req: Request) {
+  const h = req.headers.get("authorization") || req.headers.get("Authorization");
+  if (!h) return null;
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m?.[1]?.trim() || null;
 }
 
 /**
- * Files API: start resumable upload
+ * Files API - start resumable upload
+ * REST doc: display_name (snake_case) + x-goog-api-key header
  */
 async function filesStart(apiKey: string, size: number, mimeType: string) {
   const res = await fetch("https://generativelanguage.googleapis.com/upload/v1beta/files", {
@@ -60,50 +50,38 @@ async function filesStart(apiKey: string, size: number, mimeType: string) {
     const t = await res.text().catch(() => "");
     throw new Error(`Files start failed: ${res.status} ${res.statusText} ${t}`);
   }
-
   return uploadUrl;
 }
 
-/**
- * Files API: upload bytes + finalize
- * IMPORTANT: use ArrayBuffer body to keep TS happy on Vercel
- */
-async function filesUploadFinalize(uploadUrl: string, ab: ArrayBuffer) {
+async function filesUploadFinalize(uploadUrl: string, bytes: Uint8Array) {
   const res = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Content-Length": String(ab.byteLength),
+      "Content-Length": String(bytes.byteLength),
       "X-Goog-Upload-Offset": "0",
       "X-Goog-Upload-Command": "upload, finalize",
     },
-    // TS-safe: ArrayBuffer is a valid BodyInit at runtime; cast for TS
-    body: ab as any,
+    // ✅ TS-safe on Vercel: cast to BodyInit
+    body: bytes as unknown as BodyInit,
   });
 
   const json = await res.json().catch(() => null);
-
   if (!res.ok || !json?.file?.name || !json?.file?.uri) {
-    throw new Error(
-      `Files upload failed: ${res.status} ${res.statusText} ${JSON.stringify(json)}`
-    );
+    throw new Error(`Files upload failed: ${res.status} ${res.statusText} ${JSON.stringify(json)}`);
   }
 
   return {
-    fileName: json.file.name as string, // "files/..."
-    fileUri: json.file.uri as string, // "https://.../v1beta/files/..."
+    fileName: json.file.name as string,
+    fileUri: json.file.uri as string,
     mimeType: (json.file.mimeType as string | undefined) || undefined,
     state: (json.file.state as string | undefined) || undefined,
   };
 }
 
-/**
- * Files API: get file status
- */
 async function filesGet(apiKey: string, fileName: string) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}`, {
     headers: { "x-goog-api-key": apiKey },
   });
-
   const json = await res.json().catch(() => null);
 
   if (!res.ok || !json?.file) {
@@ -114,7 +92,7 @@ async function filesGet(apiKey: string, fileName: string) {
 }
 
 /**
- * REST generateContent with file_data (snake_case)
+ * generateContent (REST) con file_data in snake_case
  */
 async function geminiGenerateWithFile(
   apiKey: string,
@@ -132,31 +110,27 @@ async function geminiGenerateWithFile(
     ],
   };
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 
   const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+  if (!res.ok) {
+    throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+  }
 
   return (
-    json?.candidates?.[0]?.content?.parts
-      ?.map((p: any) => p?.text)
-      .filter(Boolean)
-      .join("\n") || ""
+    json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("\n") || ""
   );
 }
 
 /**
- * REST generateContent with inline_data (snake_case)
+ * Inline video (REST) con inline_data in snake_case
  */
 async function geminiGenerateInline(
   apiKey: string,
@@ -174,30 +148,25 @@ async function geminiGenerateInline(
     ],
   };
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 
   const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+  if (!res.ok) {
+    throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+  }
 
   return (
-    json?.candidates?.[0]?.content?.parts
-      ?.map((p: any) => p?.text)
-      .filter(Boolean)
-      .join("\n") || ""
+    json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("\n") || ""
   );
 }
 
-// ✅ GET 200 for quick sanity check
 export async function GET() {
   return NextResponse.json(
     { ok: true, routeVersion: ROUTE_VERSION },
@@ -206,7 +175,6 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  // eslint-disable-next-line no-console
   console.log("✅ ANALYZE HIT", ROUTE_VERSION, new Date().toISOString());
 
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -217,6 +185,18 @@ export async function POST(req: Request) {
     );
   }
 
+  // ✅ leggo body subito: ci serve anche per accessToken fallback
+  const body = await req.json().catch(() => ({}));
+  const videoUrl: string | undefined = body?.videoUrl || body?.url;
+  const bodyToken: string | undefined = body?.accessToken || body?.token;
+
+  if (!videoUrl) {
+    return NextResponse.json(
+      { success: false, error: "Missing videoUrl", routeVersion: ROUTE_VERSION },
+      { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+    );
+  }
+
   let userId: string | null = null;
   let creditScaled = false;
 
@@ -224,41 +204,42 @@ export async function POST(req: Request) {
     if (!userId || !creditScaled) return;
     try {
       await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: -1 });
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
   try {
-    // 1) Auth
-    userId = await resolveUserId(req);
+    // 1) prova auth da cookie
+    const supabase = createServerSupabase();
+    const { data: cookieAuth } = await supabase.auth.getUser();
+    if (cookieAuth?.user?.id) {
+      userId = cookieAuth.user.id;
+    }
+
+    // 2) fallback: bearer header oppure token dal body
     if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
-        { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-      );
+      const headerToken = getBearerTokenFromHeader(req);
+      const token = headerToken || bodyToken || null;
+
+      if (!token) {
+        return NextResponse.json(
+          { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
+          { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+        );
+      }
+
+      const { data, error } = await supabaseAdmin.auth.getUser(token);
+      if (error || !data?.user?.id) {
+        return NextResponse.json(
+          { success: false, error: "Not authenticated", details: error?.message, routeVersion: ROUTE_VERSION },
+          { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+        );
+      }
+
+      userId = data.user.id;
     }
 
-    // 2) Payload
-    const body = await req.json().catch(() => ({}));
-    const videoUrl: string | undefined = body?.videoUrl || body?.url;
-
-    if (!videoUrl) {
-      return NextResponse.json(
-        { success: false, error: "Missing videoUrl", routeVersion: ROUTE_VERSION },
-        { status: 400, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-      );
-    }
-
-    // eslint-disable-next-line no-console
-    console.log("ANALYZE videoUrl:", videoUrl);
-
-    // 3) Scale 1 credit
-    const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", {
-      uid: userId,
-      amount: 1,
-    });
-
+    // 3) scala 1 credito
+    const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: 1 });
     if (rpcErr) {
       const msg = (rpcErr.message || "").toLowerCase();
       if (msg.includes("esauriti") || msg.includes("nessun credito")) {
@@ -272,10 +253,9 @@ export async function POST(req: Request) {
         { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
-
     creditScaled = true;
 
-    // 4) Fetch video
+    // 4) scarica video
     const vidRes = await fetch(videoUrl, { cache: "no-store", redirect: "follow" });
     if (!vidRes.ok) {
       await refund();
@@ -288,11 +268,6 @@ export async function POST(req: Request) {
     const rawCt = vidRes.headers.get("content-type");
     const mimeType = normalizeMimeType(rawCt);
 
-    // eslint-disable-next-line no-console
-    console.log("ANALYZE content-type:", rawCt);
-    // eslint-disable-next-line no-console
-    console.log("ANALYZE normalized mimeType:", mimeType);
-
     if (!mimeType.startsWith("video/")) {
       await refund();
       return NextResponse.json(
@@ -301,10 +276,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Read bytes
     const ab = await vidRes.arrayBuffer();
-    // eslint-disable-next-line no-console
-    console.log("ANALYZE video bytes:", ab.byteLength);
+    const bytes = new Uint8Array(ab);
 
     const prompt = `
 You are a TikTok video analyst.
@@ -318,59 +291,51 @@ Write in Italian.
 `.trim();
 
     const model = "gemini-2.0-flash";
-
-    // Inline for small payloads only (avoid huge JSON)
     const INLINE_LIMIT = 18 * 1024 * 1024;
 
     let text = "";
 
-    if (ab.byteLength <= INLINE_LIMIT) {
-      const base64 = Buffer.from(ab).toString("base64");
-      text = await geminiGenerateInline(GEMINI_API_KEY, model, prompt, base64, mimeType);
-    } else {
-      const uploadUrl = await filesStart(GEMINI_API_KEY, ab.byteLength, mimeType);
-      const uploaded = await filesUploadFinalize(uploadUrl, ab);
+    try {
+      if (bytes.byteLength <= INLINE_LIMIT) {
+        const base64 = Buffer.from(bytes).toString("base64");
+        text = await geminiGenerateInline(GEMINI_API_KEY, model, prompt, base64, mimeType);
+      } else {
+        const uploadUrl = await filesStart(GEMINI_API_KEY, bytes.byteLength, mimeType);
+        const uploaded = await filesUploadFinalize(uploadUrl, bytes);
 
-      // eslint-disable-next-line no-console
-      console.log("ANALYZE uploaded file:", uploaded);
+        let file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
+        const start = Date.now();
 
-      // Wait ACTIVE
-      let file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
-      const start = Date.now();
+        while (file.state === "PROCESSING" && Date.now() - start < 55_000) {
+          await sleep(4000);
+          file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
+        }
 
-      while (file.state === "PROCESSING" && Date.now() - start < 55_000) {
-        // eslint-disable-next-line no-console
-        console.log("ANALYZE file state:", file.state);
-        await sleep(4000);
-        file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
+        if (file.state !== "ACTIVE") {
+          await refund();
+          return NextResponse.json(
+            { success: false, error: "Video non pronto (Files API non ACTIVE)", details: file, routeVersion: ROUTE_VERSION },
+            { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+          );
+        }
+
+        text = await geminiGenerateWithFile(GEMINI_API_KEY, model, prompt, file.uri, file.mimeType || mimeType);
       }
 
-      if (file.state !== "ACTIVE") {
-        await refund();
-        return NextResponse.json(
-          { success: false, error: "Video non pronto (Files API non ACTIVE)", details: file, routeVersion: ROUTE_VERSION },
-          { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-        );
-      }
-
-      text = await geminiGenerateWithFile(
-        GEMINI_API_KEY,
-        model,
-        prompt,
-        file.uri,
-        file.mimeType || mimeType
+      return NextResponse.json(
+        { success: true, routeVersion: ROUTE_VERSION, text },
+        { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+      );
+    } catch (e: any) {
+      await refund();
+      return NextResponse.json(
+        { success: false, error: "Gemini error", details: e?.message || String(e), routeVersion: ROUTE_VERSION },
+        { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
-
-    return NextResponse.json(
-      { success: true, routeVersion: ROUTE_VERSION, text },
-      { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-    );
   } catch (err: any) {
     await refund();
-    // eslint-disable-next-line no-console
     console.error("ANALYZE ERROR:", err);
-
     return NextResponse.json(
       { success: false, error: "Analyze failed", details: err?.message || String(err), routeVersion: ROUTE_VERSION },
       { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
