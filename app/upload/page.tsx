@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
-// 🔴 BLOCCA PRERENDER
 export const dynamic = "force-dynamic";
 
 export default function UploadPage() {
@@ -12,21 +11,39 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState("");
   const [credits, setCredits] = useState<number | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // ✅ CARICA SUPABASE SOLO IN BROWSER
+  // ✅ carica supabase client solo in browser
   useEffect(() => {
-    import("@/lib/supabaseClient").then((m) => {
-      setSupabase(m.supabaseClient);
-    });
+    import("@/lib/supabaseClient").then((m) => setSupabase(m.supabaseClient));
   }, []);
 
-  // 🔥 RECUPERO UTENTE + CREDITI
+  async function getAccessToken(): Promise<string | null> {
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token ?? null;
+  }
+
+  // ✅ carica user + crediti
+  async function refreshCredits(currentUserId?: string) {
+    if (!supabase) return;
+
+    const uid = currentUserId || userId;
+    if (!uid) return;
+
+    const { data, error } = await supabase
+      .from("analisi_video")
+      .select("credits")
+      .eq("user_id", uid)
+      .single();
+
+    setCredits(error ? 0 : (data?.credits ?? 0));
+  }
+
   useEffect(() => {
     if (!supabase) return;
 
-    async function loadUser() {
+    (async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -36,55 +53,48 @@ export default function UploadPage() {
         return;
       }
 
-      setEmail(user.email ?? null);
       setUserId(user.id);
-
-      const { data, error } = await supabase
-        .from("analisi_video")
-        .select("credits")
-        .eq("user_id", user.id)
-        .single();
-
-      if (!error) {
-        setCredits(data?.credits ?? 0);
-      }
-    }
-
-    loadUser();
+      await refreshCredits(user.id);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
-  // 🚀 ANALISI VIDEO
-  async function analyzeVideo(url: string) {
-    if (!userId) return;
+  // ✅ ANALYZE
+  async function analyzeVideo(videoUrl: string) {
+    const token = await getAccessToken();
 
     const res = await fetch("/api/analyze", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, user_id: userId }),
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      body: JSON.stringify({ videoUrl }),
     });
 
-    const data = await res.json();
-    if (!data.success) {
-      alert(data.error);
+    const data = await res.json().catch(() => ({}));
+
+    if (data?.redirect) {
+      window.location.href = data.redirect;
       return;
     }
 
-    setAiResponse(data.text);
+    if (!data?.success) {
+      alert(data?.error || data?.details || "Errore analisi");
+      await refreshCredits();
+      return;
+    }
 
-    const { data: updated } = await supabase
-      .from("analisi_video")
-      .select("credits")
-      .eq("user_id", userId)
-      .single();
-
-    setCredits(updated?.credits ?? 0);
+    setAiResponse(data.text || "");
+    await refreshCredits();
   }
 
-  // 📤 UPLOAD
+  // ✅ UPLOAD
   async function handleUpload() {
-    if (!file || !email || !userId) return;
+    if (!file) return;
 
-    if (credits === 0) {
+    if (credits !== null && credits <= 0) {
       window.location.href = "/pricing";
       return;
     }
@@ -92,47 +102,110 @@ export default function UploadPage() {
     setLoading(true);
     setAiResponse("");
 
-    const form = new FormData();
-    form.append("file", file);
-    form.append("email", email);
-    form.append("user_id", userId);
+    try {
+      const token = await getAccessToken();
 
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: form,
-    });
+      const form = new FormData();
+      form.append("file", file);
 
-    const json = await res.json();
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          // ❌ NON mettere Content-Type qui, lo setta il browser per il multipart boundary
+        },
+        body: form,
+      });
 
-    if (json.success && json.url) {
-      await analyzeVideo(json.url);
-    } else {
-      alert(json.error);
+      const json = await res.json().catch(() => ({}));
+
+      if (json?.redirect) {
+        window.location.href = json.redirect;
+        return;
+      }
+
+      if (json?.success && typeof json.url === "string" && json.url.startsWith("http")) {
+        await analyzeVideo(json.url);
+      } else {
+        alert(json?.error || json?.details || "Upload error");
+      }
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   if (credits === null || !supabase) {
     return <p style={{ color: "white" }}>Caricamento...</p>;
   }
 
+  const noCredits = credits <= 0;
+
   return (
-    <main style={{ minHeight: "100vh", background: "#0d1117", color: "white" }}>
-      <h1>Carica un video</h1>
-      <p>Crediti: {credits}</p>
+    <main style={{ minHeight: "100vh", background: "#0d1117", color: "white", padding: 24 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 10 }}>Carica un video</h1>
 
-      <input
-        type="file"
-        accept="video/*"
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-      />
+      <p style={{ opacity: 0.8, marginBottom: 18 }}>
+        Crediti: <b>{credits}</b>
+        {noCredits && (
+          <>
+            {" "}
+            —{" "}
+            <a href="/pricing" style={{ color: "#60a5fa" }}>
+              Ricarica
+            </a>
+          </>
+        )}
+      </p>
 
-      <button onClick={handleUpload} disabled={loading}>
-        {loading ? "Analisi..." : "Carica e analizza"}
-      </button>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          type="file"
+          accept="video/*"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          style={{
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid #374151",
+            background: "#111827",
+            color: "white",
+            maxWidth: 420,
+          }}
+        />
 
-      {aiResponse && <pre>{aiResponse}</pre>}
+        <button
+          onClick={handleUpload}
+          disabled={loading || !file || noCredits}
+          style={{
+            padding: "12px 16px",
+            borderRadius: 10,
+            border: "none",
+            background: "#2563eb",
+            color: "white",
+            fontWeight: 800,
+            cursor: loading || !file || noCredits ? "not-allowed" : "pointer",
+            opacity: loading || !file || noCredits ? 0.7 : 1,
+          }}
+        >
+          {loading ? "Analisi..." : "Carica e analizza"}
+        </button>
+      </div>
+
+      {aiResponse && (
+        <pre
+          style={{
+            marginTop: 18,
+            padding: 14,
+            borderRadius: 12,
+            border: "1px solid #1f2937",
+            background: "#0b1220",
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.45,
+          }}
+        >
+          {aiResponse}
+        </pre>
+      )}
     </main>
   );
 }
