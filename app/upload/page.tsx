@@ -18,10 +18,10 @@ export default function UploadPage() {
     import("@/lib/supabaseClient").then((m) => setSupabase(m.supabaseClient));
   }, []);
 
-  async function getAccessToken(): Promise<string | null> {
+  async function getAccessToken() {
     if (!supabase) return null;
     const { data } = await supabase.auth.getSession();
-    return data?.session?.access_token ?? null;
+    return data?.session?.access_token || null;
   }
 
   // ✅ carica user + crediti
@@ -37,6 +37,7 @@ export default function UploadPage() {
       .eq("user_id", uid)
       .single();
 
+    // se manca la riga, mostro 0 (ma NON blocco la pagina)
     setCredits(error ? 0 : (data?.credits ?? 0));
   }
 
@@ -44,9 +45,8 @@ export default function UploadPage() {
     if (!supabase) return;
 
     (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
 
       if (!user) {
         window.location.href = "/auth/login";
@@ -81,7 +81,11 @@ export default function UploadPage() {
     }
 
     if (!data?.success) {
-      alert(data?.error || data?.details || "Errore analisi");
+      alert(
+        data?.error ||
+          data?.details ||
+          `Errore analisi (status ${res.status})`
+      );
       await refreshCredits();
       return;
     }
@@ -110,11 +114,11 @@ export default function UploadPage() {
 
       const res = await fetch("/api/upload", {
         method: "POST",
-        credentials: "include",
+        // ✅ IMPORTANTISSIMO: qui il token risolve i problemi tra domini/cookie
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          // ❌ NON mettere Content-Type qui, lo setta il browser per il multipart boundary
         },
+        credentials: "include",
         body: form,
       });
 
@@ -125,10 +129,16 @@ export default function UploadPage() {
         return;
       }
 
-      if (json?.success && typeof json.url === "string" && json.url.startsWith("http")) {
+      if (!json?.success) {
+        alert(json?.error || json?.details || `Upload error (status ${res.status})`);
+        await refreshCredits();
+        return;
+      }
+
+      if (typeof json.url === "string" && json.url.startsWith("http")) {
         await analyzeVideo(json.url);
       } else {
-        alert(json?.error || json?.details || "Upload error");
+        alert("Upload ok ma URL mancante/non valido");
       }
     } finally {
       setLoading(false);
@@ -150,10 +160,7 @@ export default function UploadPage() {
         {noCredits && (
           <>
             {" "}
-            —{" "}
-            <a href="/pricing" style={{ color: "#60a5fa" }}>
-              Ricarica
-            </a>
+            — <a href="/pricing" style={{ color: "#60a5fa" }}>Ricarica</a>
           </>
         )}
       </p>
