@@ -1,26 +1,24 @@
 "use client";
 
 import { useState } from "react";
-
-// 🔴 impedisce il prerender
-export const dynamic = "force-dynamic";
+import { useRouter } from "next/navigation";
+import { supabaseClient } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const supabase = supabaseClient;
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = async () => {
-    if (loading) return;
-
-    setError("");
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
+    setError(null);
 
-    // ✅ import SUPABASE SOLO A RUNTIME
-    const { supabaseClient } = await import("@/lib/supabaseClient");
-    const supabase = supabaseClient;
-
+    // 1️⃣ Login
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -32,7 +30,19 @@ export default function LoginPage() {
       return;
     }
 
-    window.location.href = "/dashboard";
+    // 2️⃣ ASPETTA la sessione reale (CRITICO)
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setError("Sessione non creata. Riprova.");
+      setLoading(false);
+      return;
+    }
+
+    // 3️⃣ Redirect SICURO
+    router.push("/dashboard");
   };
 
   return (
@@ -44,89 +54,57 @@ export default function LoginPage() {
         alignItems: "center",
         background: "#0d1117",
         color: "white",
-        padding: 20,
-        fontFamily: "system-ui",
       }}
     >
-      <div
+      <form
+        onSubmit={handleLogin}
         style={{
+          width: 320,
           background: "#111827",
-          padding: "40px 35px",
-          borderRadius: 14,
-          width: "100%",
-          maxWidth: 420,
-          boxShadow: "0 12px 32px rgba(0,0,0,0.35)",
+          padding: 24,
+          borderRadius: 12,
         }}
       >
-        <h1
-          style={{
-            textAlign: "center",
-            fontSize: "2rem",
-            fontWeight: 800,
-            marginBottom: 25,
-          }}
-        >
-          Accedi
-        </h1>
+        <h1 style={{ marginBottom: 16 }}>Accedi</h1>
 
-        <label style={label}>Email</label>
         <input
           type="email"
+          placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={input}
+          required
+          style={{ width: "100%", marginBottom: 12, padding: 10 }}
         />
 
-        <label style={label}>Password</label>
         <input
           type="password"
+          placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          style={input}
+          required
+          style={{ width: "100%", marginBottom: 12, padding: 10 }}
         />
 
-        {error && (
-          <p style={{ color: "#ef4444", marginTop: 10, textAlign: "center" }}>
-            {error}
-          </p>
-        )}
-
         <button
-          onClick={handleLogin}
+          type="submit"
           disabled={loading}
           style={{
             width: "100%",
-            marginTop: 20,
-            padding: "14px",
+            padding: 12,
             background: "#2563eb",
-            border: "none",
-            borderRadius: 10,
             color: "white",
-            fontSize: "1.1rem",
-            fontWeight: 700,
+            border: "none",
+            borderRadius: 8,
             cursor: loading ? "not-allowed" : "pointer",
-            opacity: loading ? 0.7 : 1,
           }}
         >
-          {loading ? "Accesso..." : "Login"}
+          {loading ? "Accesso..." : "Accedi"}
         </button>
-      </div>
+
+        {error && (
+          <p style={{ color: "#ef4444", marginTop: 12 }}>{error}</p>
+        )}
+      </form>
     </main>
   );
 }
-
-const input = {
-  width: "100%",
-  padding: "12px",
-  borderRadius: 8,
-  border: "1px solid #374151",
-  background: "#1f2937",
-  color: "white",
-  marginBottom: 20,
-};
-
-const label = {
-  display: "block",
-  marginBottom: 6,
-  fontWeight: 600,
-};
