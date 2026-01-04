@@ -2,51 +2,51 @@ import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+const ROUTE_VERSION = "DEBUG-V1";
+
 export async function GET() {
   try {
-    // 1) check ENV (server-side)
-    const env = {
-      NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      SUPABASE_URL: !!process.env.SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-    };
+    // ✅ FIX: await
+    const supabase = await createServerSupabase();
 
-    // 2) auth via cookie
-    const supabase = createServerSupabase();
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser();
 
-    // 3) read credits via admin (bypass RLS)
-    let creditsRow: any = null;
-    let creditsErr: any = null;
-
-    if (user?.id) {
-      const { data, error } = await supabaseAdmin
-        .from("analisi_video")
-        .select("credits, email, user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      creditsRow = data ?? null;
-      creditsErr = error ? { message: error.message, code: error.code } : null;
+    if (authErr || !user) {
+      return NextResponse.json(
+        { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
+        { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+      );
     }
 
-    return NextResponse.json({
-      ok: true,
-      env,
-      auth: {
-        user: user ? { id: user.id, email: user.email } : null,
-        error: authErr ? { message: authErr.message } : null,
-      },
-      credits: {
-        row: creditsRow,
-        error: creditsErr,
-      },
-    });
-  } catch (e: any) {
+    // esempio: leggi crediti (bypass RLS)
+    const { data, error } = await supabaseAdmin
+      .from("analisi_video")
+      .select("credits, user_id, updated_at, created_at")
+      .eq("user_id", user.id)
+      .single();
+
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
-      { status: 500 }
+      {
+        success: true,
+        routeVersion: ROUTE_VERSION,
+        userId: user.id,
+        credits: error ? null : data?.credits ?? null,
+        row: error ? null : data,
+        error: error ? error.message : null,
+      },
+      { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, error: "Debug failed", details: err?.message || String(err), routeVersion: ROUTE_VERSION },
+      { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
     );
   }
 }
