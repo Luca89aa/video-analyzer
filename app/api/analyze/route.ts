@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const ROUTE_VERSION = "ANALYZE-REST-FILES-V7";
+const ROUTE_VERSION = "ANALYZE-REST-FILES-V8";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -15,19 +15,14 @@ function sleep(ms: number) {
 function normalizeMimeType(ct: string | null) {
   if (!ct) return "video/mp4";
   const clean = ct.split(";")[0].trim().toLowerCase();
-
-  // a volte arriva "application/octet-stream" da storage/CDN
-  if (clean === "application/octet-stream") return "video/mp4";
-
-  // se non è un mime valido, fallback
   if (!clean.includes("/")) return "video/mp4";
-
+  if (clean === "application/octet-stream") return "video/mp4";
   return clean;
 }
 
 /**
  * Start resumable upload (Files API)
- * REST doc usa display_name e x-goog-api-key header
+ * Uses snake_case display_name and x-goog-api-key header
  */
 async function filesStart(apiKey: string, size: number, mimeType: string) {
   const res = await fetch("https://generativelanguage.googleapis.com/upload/v1beta/files", {
@@ -52,7 +47,10 @@ async function filesStart(apiKey: string, size: number, mimeType: string) {
   return uploadUrl;
 }
 
-async function filesUploadFinalize(uploadUrl: string, bytes: Uint8Array) {
+async function filesUploadFinalize(uploadUrl: string, bytes: Uint8Array, mimeType: string) {
+  // ✅ TS-safe BodyInit on Vercel: use Blob (instead of Buffer/Uint8Array directly)
+  const blob = new Blob([bytes], { type: mimeType });
+
   const res = await fetch(uploadUrl, {
     method: "POST",
     headers: {
@@ -60,8 +58,7 @@ async function filesUploadFinalize(uploadUrl: string, bytes: Uint8Array) {
       "X-Goog-Upload-Offset": "0",
       "X-Goog-Upload-Command": "upload, finalize",
     },
-    // TS su Vercel può lamentarsi: cast esplicito
-    body: bytes as any,
+    body: blob,
   });
 
   const json = await res.json().catch(() => null);
@@ -74,7 +71,7 @@ async function filesUploadFinalize(uploadUrl: string, bytes: Uint8Array) {
 
   return {
     fileName: json.file.name as string, // "files/..."
-    fileUri: json.file.uri as string,   // "https://.../v1beta/files/..."
+    fileUri: json.file.uri as string, // "https://.../v1beta/files/..."
     mimeType: (json.file.mimeType as string | undefined) || undefined,
     state: (json.file.state as string | undefined) || undefined,
   };
@@ -95,8 +92,8 @@ async function filesGet(apiKey: string, fileName: string) {
 }
 
 /**
- * generateContent (REST) con file_data in snake_case
- * (La doc raccomanda: video part prima del testo)
+ * generateContent (REST) with file_data (snake_case)
+ * Recommended: file part before text part
  */
 async function geminiGenerateWithFile(
   apiKey: string,
@@ -109,59 +106,7 @@ async function geminiGenerateWithFile(
     contents: [
       {
         role: "user",
-        parts: [
-          { file_data: { mime_type: mimeType, file_uri: fileUri } },
-          { text: prompt },
-        ],
-      },
-    ],
-  };
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }
-  );
-
-  const json = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    // questo è il motivo vero, non “invalid argument” generico
-    throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
-  }
-
-  return (
-    json?.candidates?.[0]?.content?.parts
-      ?.map((p: any) => p?.text)
-      .filter(Boolean)
-      .join("\n") || ""
-  );
-}
-
-/**
- * Inline video (<20MB) - REST usa inline_data in snake_case
- */
-async function geminiGenerateInline(
-  apiKey: string,
-  model: string,
-  prompt: string,
-  base64: string,
-  mimeType: string
-) {
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { inline_data: { mime_type: mimeType, data: base64 } },
-          { text: prompt },
-        ],
+        parts: [{ file_data: { mime_type: mimeType, file_uri: fileUri } }, { text: prompt }],
       },
     ],
   };
@@ -189,7 +134,65 @@ async function geminiGenerateInline(
   );
 }
 
-// GET 200 per verificare che stai hit-tando la route giusta
+/**
+ * Inline video (small) - REST uses inline_data (snake_case)
+ */
+async function geminiGenerateInline(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  base64: string,
+  mimeType: string
+) {
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: prompt }],
+      },
+    ],
+  };
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "x-goog-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }
+  );
+
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(json)}`);
+
+  return (
+    json?.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p?.text)
+      .filter(Boolean)
+      .join("\n") || ""
+  );
+}
+
+async function resolveUserId(req: Request): Promise<string | null> {
+  // 1) Cookie/session (same-domain)
+  const supabase = createServerSupabase();
+  const { data } = await supabase.auth.getUser();
+  if (data?.user?.id) return data.user.id;
+
+  // 2) Bearer token (cross-domain safe)
+  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return null;
+
+  const { data: adminData, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !adminData?.user?.id) return null;
+  return adminData.user.id;
+}
+
+// GET 200 to verify you’re hitting the right route
 export async function GET() {
   return NextResponse.json(
     { ok: true, routeVersion: ROUTE_VERSION },
@@ -198,7 +201,6 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  // log impossibile da perdere
   // eslint-disable-next-line no-console
   console.log("✅ ANALYZE HIT", ROUTE_VERSION, new Date().toISOString());
 
@@ -218,44 +220,25 @@ export async function POST(req: Request) {
     try {
       await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: -1 });
     } catch {
-      // niente
+      // ignore
     }
   };
 
   try {
-    // 1) Auth: prima cookie (server supabase), poi fallback Bearer token
-    const supabase = createServerSupabase();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // 1) Auth (cookie -> bearer fallback)
+    userId = await resolveUserId(req);
 
-    if (user?.id) {
-      userId = user.id;
-    } else {
-      const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
-      const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-      if (!token) {
-        return NextResponse.json(
-          { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
-          { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-        );
-      }
-
-      const { data, error } = await supabaseAdmin.auth.getUser(token);
-      if (error || !data?.user) {
-        return NextResponse.json(
-          { success: false, error: "Not authenticated", details: error?.message, routeVersion: ROUTE_VERSION },
-          { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
-        );
-      }
-
-      userId = data.user.id;
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
+        { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+      );
     }
 
     // 2) Payload
     const body = await req.json().catch(() => ({}));
     const videoUrl: string | undefined = body?.videoUrl || body?.url;
+
     if (!videoUrl) {
       return NextResponse.json(
         { success: false, error: "Missing videoUrl", routeVersion: ROUTE_VERSION },
@@ -266,8 +249,12 @@ export async function POST(req: Request) {
     // eslint-disable-next-line no-console
     console.log("ANALYZE videoUrl:", videoUrl);
 
-    // 3) Scala 1 credito
-    const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", { uid: userId, amount: 1 });
+    // 3) Scale 1 credit
+    const { error: rpcErr } = await supabaseAdmin.rpc("decrease_credits", {
+      uid: userId,
+      amount: 1,
+    });
+
     if (rpcErr) {
       const msg = (rpcErr.message || "").toLowerCase();
       if (msg.includes("esauriti") || msg.includes("nessun credito")) {
@@ -276,14 +263,16 @@ export async function POST(req: Request) {
           { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
         );
       }
+
       return NextResponse.json(
         { success: false, error: rpcErr.message || "Credits error", routeVersion: ROUTE_VERSION },
         { status: 403, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
       );
     }
+
     creditScaled = true;
 
-    // 4) Scarica video dal link pubblico
+    // 4) Download video from public URL
     const vidRes = await fetch(videoUrl, { cache: "no-store", redirect: "follow" });
     if (!vidRes.ok) {
       await refund();
@@ -334,8 +323,7 @@ Write in Italian.
     const model = "gemini-2.0-flash";
 
     try {
-      // Inline sotto ~20MB, altrimenti Files API
-      // (La doc consiglia Files API per video > 20MB o più lunghi) :contentReference[oaicite:1]{index=1}
+      // Inline only for small payloads; otherwise Files API
       const INLINE_LIMIT = 18 * 1024 * 1024;
 
       let text = "";
@@ -345,12 +333,12 @@ Write in Italian.
         text = await geminiGenerateInline(GEMINI_API_KEY, model, prompt, base64, mimeType);
       } else {
         const uploadUrl = await filesStart(GEMINI_API_KEY, bytes.byteLength, mimeType);
-        const uploaded = await filesUploadFinalize(uploadUrl, bytes);
+        const uploaded = await filesUploadFinalize(uploadUrl, bytes, mimeType);
 
         // eslint-disable-next-line no-console
         console.log("ANALYZE uploaded file:", uploaded);
 
-        // Wait ACTIVE (video spesso resta PROCESSING)
+        // Wait ACTIVE
         let file = await filesGet(GEMINI_API_KEY, uploaded.fileName);
         const start = Date.now();
 
