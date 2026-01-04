@@ -48,8 +48,9 @@ export default function UploadPage() {
       const { data } = await supabase.auth.getUser();
       const user = data?.user;
 
+      // ✅ QUI: se non loggato -> vai a REGISTER (non login)
       if (!user) {
-        window.location.href = "/auth/login";
+        window.location.href = "/auth/register";
         return;
       }
 
@@ -130,7 +131,11 @@ export default function UploadPage() {
       }
 
       if (!json?.success) {
-        alert(json?.error || json?.details || `Upload error (status ${res.status})`);
+        alert(
+          json?.error ||
+            json?.details ||
+            `Upload error (status ${res.status})`
+        );
         await refreshCredits();
         return;
       }
@@ -152,20 +157,39 @@ export default function UploadPage() {
   const noCredits = credits <= 0;
 
   return (
-    <main style={{ minHeight: "100vh", background: "#0d1117", color: "white", padding: 24 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 10 }}>Carica un video</h1>
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#0d1117",
+        color: "white",
+        padding: 24,
+      }}
+    >
+      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 10 }}>
+        Carica un video
+      </h1>
 
       <p style={{ opacity: 0.8, marginBottom: 18 }}>
         Crediti: <b>{credits}</b>
         {noCredits && (
           <>
             {" "}
-            — <a href="/pricing" style={{ color: "#60a5fa" }}>Ricarica</a>
+            —{" "}
+            <a href="/pricing" style={{ color: "#60a5fa" }}>
+              Ricarica
+            </a>
           </>
         )}
       </p>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
         <input
           type="file"
           accept="video/*"
@@ -190,7 +214,8 @@ export default function UploadPage() {
             background: "#2563eb",
             color: "white",
             fontWeight: 800,
-            cursor: loading || !file || noCredits ? "not-allowed" : "pointer",
+            cursor:
+              loading || !file || noCredits ? "not-allowed" : "pointer",
             opacity: loading || !file || noCredits ? 0.7 : 1,
           }}
         >
