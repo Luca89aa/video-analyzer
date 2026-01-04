@@ -1,13 +1,25 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabaseServer";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+const ROUTE_VERSION = "CREDITS-GET-V1";
+
 export async function GET() {
   try {
-    const supabase = createServerSupabase();
+    const supabase = await createServerSupabase(); // ✅ FIX: await
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Not authenticated", routeVersion: ROUTE_VERSION },
+        { status: 401, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+      );
     }
 
     const { data, error } = await supabase
@@ -17,12 +29,20 @@ export async function GET() {
       .single();
 
     if (error) {
-      // qui è il tuo "Crediti non trovati"
-      return NextResponse.json({ error: "Crediti non trovati", details: error.message }, { status: 404 });
+      return NextResponse.json(
+        { success: true, credits: 0, routeVersion: ROUTE_VERSION },
+        { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+      );
     }
 
-    return NextResponse.json({ credits: data.credits });
+    return NextResponse.json(
+      { success: true, credits: data?.credits ?? 0, routeVersion: ROUTE_VERSION },
+      { status: 200, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+    );
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: "Credits get failed", details: err?.message || String(err), routeVersion: ROUTE_VERSION },
+      { status: 500, headers: { "Cache-Control": "no-store", "x-route-version": ROUTE_VERSION } }
+    );
   }
 }
