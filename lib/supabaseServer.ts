@@ -1,27 +1,28 @@
-import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
-export function createServerSupabase() {
-  const cookieStore = cookies();
+export async function createServerSupabase() {
+  const cookieStore = await cookies();
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,       // ✅ stessa URL del client
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,  // ✅ stessa anon key del client
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // ok in route handlers
-          }
-        },
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  return createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        // In alcuni contesti Next non permette set sui cookies (readonly).
+        // Non deve rompere la route: per quello try/catch.
+        try {
+          for (const { name, value, options } of cookiesToSet) {
+            (cookieStore as any).set(name, value, options);
+          }
+        } catch {
+          // ignore
+        }
+      },
+    },
+  });
 }
