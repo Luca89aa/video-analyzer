@@ -16,7 +16,7 @@ serve(async (req) => {
     .from("analisi_video")
     .insert({
       user_id: user.id,
-      credits: 0,       // crediti iniziali
+      credits: 1,       // crediti iniziali
       created_at: new Date(),
     });
 
