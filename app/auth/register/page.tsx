@@ -42,7 +42,7 @@ export default function RegisterPage() {
     if (data.user) {
       const { error: insertErr } = await supabase.from("analisi_video").insert({
         user_id: data.user.id,
-        credits: 0,
+        credits: 1,
         email, // <-- colonna è "email" (non "mail")
       });
 
