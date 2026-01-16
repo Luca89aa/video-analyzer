@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     // crea (o assicura) riga crediti
     const { error } = await supabase
       .from("analisi_video")
-      .upsert({ user_id, email, credits: 0 }, { onConflict: "user_id" });
+      .upsert({ user_id, email, credits: 1 }, { onConflict: "user_id" });
 
     if (error) {
       return Response.json(
